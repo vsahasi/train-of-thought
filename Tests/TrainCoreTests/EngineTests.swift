@@ -107,7 +107,8 @@ final class EngineTests: XCTestCase {
     }
 
     func testHoppingBetweenOtherAppsKeepsTheOriginalDueTime() {
-        var engine = runningEngine(rules: Rules(grace: 5))
+        var engine = runningEngine(rules: Rules(carInterval: 60, grace: 5))
+        _ = engine.handle(.tick(at: at(60)))
         _ = engine.handle(.appActivated(slack, at: at(100)))
         XCTAssertEqual(engine.handle(.appActivated(terminal, at: at(103))), [])
         let effects = engine.handle(.tick(at: at(105)))
@@ -119,12 +120,39 @@ final class EngineTests: XCTestCase {
     }
 
     func testZeroGraceDerailsImmediately() {
-        var engine = runningEngine(rules: Rules(grace: 0))
+        var engine = runningEngine(rules: Rules(carInterval: 5, grace: 0))
+        _ = engine.handle(.tick(at: at(5)))
         let effects = engine.handle(.appActivated(slack, at: at(10)))
         guard case .derailed? = effects.first else {
             return XCTFail("expected an immediate derail, got \(effects)")
         }
         XCTAssertEqual(effects.last, .sessionStarted(slack))
+    }
+
+    func testALoneLocomotiveReroutesInsteadOfWrecking() {
+        var engine = runningEngine(rules: Rules(grace: 5))
+        XCTAssertEqual(engine.handle(.appActivated(slack, at: at(10))), [.braking(toward: slack)])
+        XCTAssertEqual(engine.handle(.tick(at: at(15))), [.rerouted(from: xcode), .sessionStarted(slack)])
+        XCTAssertEqual(engine.session?.app, slack)
+    }
+
+    func testANotificationStillWrecksALoneLocomotive() {
+        var engine = runningEngine()
+        let effects = engine.handle(.notification(at: at(10)))
+        guard case .derailed(let wreck)? = effects.first else {
+            return XCTFail("expected a derail, got \(effects)")
+        }
+        XCTAssertEqual(wreck.run.cars, 0)
+    }
+
+    func testTheDesktopIsAHallway() {
+        let finder = App(bundleID: "com.apple.finder", name: "Finder")
+        var engine = Engine()
+        XCTAssertEqual(engine.handle(.appActivated(finder, at: t0)), [])
+        XCTAssertEqual(engine.handle(.appActivated(xcode, at: at(1))), [.sessionStarted(xcode)])
+        XCTAssertEqual(engine.handle(.appActivated(finder, at: at(2))), [])
+        XCTAssertEqual(engine.handle(.tick(at: at(30))), [])
+        XCTAssertEqual(engine.session?.app, xcode)
     }
 
     // MARK: Rule 4: notifications derail
@@ -171,7 +199,8 @@ final class EngineTests: XCTestCase {
     }
 
     func testAPassengerDuringBrakingDoesNotSaveTheTrain() {
-        var engine = runningEngine(rules: Rules(grace: 5))
+        var engine = runningEngine(rules: Rules(carInterval: 5, grace: 5))
+        _ = engine.handle(.tick(at: at(5)))
         _ = engine.handle(.appActivated(slack, at: at(10)))
         XCTAssertEqual(engine.handle(.appActivated(spotlight, at: at(12))), [])
         let effects = engine.handle(.tick(at: at(15)))

@@ -72,7 +72,13 @@ public enum Event: Equatable {
 public enum Effect: Equatable {
     case sessionStarted(App)
     case carAdded(Car, total: Int)
+    /// A train with cars came off the rails. Always followed by
+    /// `sessionStarted` when a new train can leave.
     case derailed(Wreck)
+    /// A lone locomotive (no cars yet) was switched away from. Nothing to
+    /// lose, so no wreck and nothing recorded: the locomotive simply moves
+    /// to the new line. Followed by `sessionStarted`.
+    case rerouted(from: App)
     /// You switched away and came back inside the grace period.
     case nearMiss
     /// Another app is frontmost and the grace clock is running.
@@ -89,7 +95,7 @@ public enum Effect: Equatable {
     case resumed
 }
 
-public enum State: Equatable {
+public enum EngineState: Equatable {
     case idle
     case running(Session, pending: PendingDerail?)
     case parked(Session, StationReason)
@@ -102,7 +108,7 @@ public enum State: Equatable {
 /// Everything that happens on screen is a reaction to the effects it
 /// returns, which is what makes the rules testable in isolation.
 public struct Engine {
-    public private(set) var state: State = .idle
+    public private(set) var state: EngineState = .idle
     /// The frontmost app as last reported, tracked in every state so the
     /// engine knows where a new train should leave from.
     public private(set) var frontmost: App?
@@ -268,13 +274,16 @@ public struct Engine {
     }
 
     private mutating func derail(_ session: Session, cause: DerailCause, at now: Date) -> [Effect] {
-        let wreck = Wreck(run: run(from: session, endedAt: now, ending: .derailed(cause)), cause: cause)
         state = .idle
         let fallback: App
         switch cause {
         case .switchedTo(let app): fallback = app
         case .notification: fallback = session.app
         }
+        if session.cars.isEmpty, case .switchedTo = cause {
+            return [.rerouted(from: session.app)] + startIfPossible(at: now, fallback: fallback)
+        }
+        let wreck = Wreck(run: run(from: session, endedAt: now, ending: .derailed(cause)), cause: cause)
         return [.derailed(wreck)] + startIfPossible(at: now, fallback: fallback)
     }
 

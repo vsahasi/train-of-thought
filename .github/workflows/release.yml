@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build universal app and publish
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: swift test
+      - name: Bundle (arm64 + x86_64)
+        run: ARCHS="arm64 x86_64" VERSION="${GITHUB_REF_NAME#v}" Scripts/bundle.sh
+      - name: Zip
+        run: |
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent "Train of Thought.app" "Train-of-Thought-${GITHUB_REF_NAME#v}.zip"
+          shasum -a 256 "Train-of-Thought-${GITHUB_REF_NAME#v}.zip" | tee "Train-of-Thought-${GITHUB_REF_NAME#v}.zip.sha256"
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/Train-of-Thought-*.zip
+            build/Train-of-Thought-*.zip.sha256
+          generate_release_notes: true
+          body: |
+            Unsigned build (no Apple Developer account behind this project yet). After unzipping, either right-click the app and choose **Open**, or run:
+
+            ```
+            xattr -d com.apple.quarantine "Train of Thought.app"
+            ```
+
+            Or install with Homebrew: `brew install --cask vsahasi/tap/train-of-thought`.

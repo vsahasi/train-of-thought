@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Build
+        run: swift build -c release
+      - name: Test
+        run: swift test
+      - name: Bundle
+        run: Scripts/bundle.sh
+      - name: Smoke-test the probe
+        run: |
+          # The binary must start and the --probe path must still be running two seconds later.
+          "build/Train of Thought.app/Contents/MacOS/TrainOfThought" --probe > probe.log 2>&1 &
+          pid=$!
+          sleep 2
+          kill -0 "$pid"
+          kill "$pid"
+          head -3 probe.log

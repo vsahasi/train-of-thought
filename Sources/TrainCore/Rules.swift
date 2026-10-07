@@ -94,6 +94,8 @@ public struct Rules: Equatable {
         "com.1password.1password",
         "com.agilebits.onepassword7",
         "com.bitwarden.desktop",
+        // The desktop and Finder are the hallway between rooms, not a room.
+        "com.apple.finder",
         // System chrome and prompts.
         "com.apple.SecurityAgent",
         "com.apple.loginwindow",
