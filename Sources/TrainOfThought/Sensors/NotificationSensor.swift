@@ -2,13 +2,16 @@ import AppKit
 
 /// Notices notification banners by watching the window server.
 ///
-/// Banners are ordinary windows owned by the `NotificationCenter` process.
-/// `CGWindowListCopyWindowInfo` lists on-screen windows with their owner
-/// and bounds without any permission, so we poll it twice a second and
-/// fire when a banner-sized NotificationCenter window appears that we have
-/// not seen before. The Notification Center panel itself (the tall one
-/// behind the clock) and desktop widgets are filtered out by size and
-/// level. Nothing about the notification's content is read.
+/// `CGWindowListCopyWindowInfo` lists on-screen windows with their owner,
+/// layer and bounds without any permission. While a banner is showing, the
+/// Notification Center process has a window at a positive layer (on recent
+/// macOS it is a full-screen host window that the banner is drawn into; on
+/// older releases, a banner-sized window). When none was there and one
+/// appears, a banner arrived. Desktop widgets live at a deeply negative
+/// layer and are ignored. Nothing about the notification's content is read.
+///
+/// Opening the Notification Center panel from the clock also counts; that
+/// is a distraction too.
 ///
 /// Run the app with `--probe` to watch this sensor work.
 final class NotificationSensor {
@@ -17,9 +20,10 @@ final class NotificationSensor {
     private var timer: Timer?
     private var known: Set<Int> = []
 
-    static let ownerName = "NotificationCenter"
-    static let bannerHeightRange: ClosedRange<CGFloat> = 24...260
-    static let bannerMaxWidth: CGFloat = 720
+    /// "Notification Center" on recent macOS, "NotificationCenter" on older.
+    static func isNotificationCenter(_ owner: String) -> Bool {
+        owner.replacingOccurrences(of: " ", with: "").caseInsensitiveCompare("NotificationCenter") == .orderedSame
+    }
 
     func start() {
         guard timer == nil else { return }
@@ -49,19 +53,19 @@ final class NotificationSensor {
         let level: Int
     }
 
-    /// On-screen NotificationCenter windows that look like banners.
+    /// On-screen Notification Center windows at a positive layer: the
+    /// banner host. Widgets (negative layers) are excluded.
     static func bannerWindows() -> [BannerWindow] {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
         return list.compactMap { info in
-            guard (info[kCGWindowOwnerName as String] as? String) == ownerName else { return nil }
+            guard let owner = info[kCGWindowOwnerName as String] as? String, isNotificationCenter(owner) else { return nil }
             guard let id = info[kCGWindowNumber as String] as? Int else { return nil }
             let level = info[kCGWindowLayer as String] as? Int ?? 0
             guard level > 0 else { return nil }
-            guard let dict = info[kCGWindowBounds as String] as? NSDictionary,
-                  let bounds = CGRect(dictionaryRepresentation: dict) else { return nil }
-            guard bannerHeightRange.contains(bounds.height), bounds.width < bannerMaxWidth else { return nil }
+            var bounds = CGRect.zero
+            if let dict = info[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: dict) { bounds = r }
             return BannerWindow(id: id, bounds: bounds, level: level)
         }
     }
@@ -69,6 +73,7 @@ final class NotificationSensor {
     /// Prints every NotificationCenter window change until killed. For
     /// checking the sensor on a new macOS release.
     static func probe() -> Never {
+        setvbuf(stdout, nil, _IOLBF, 0)
         print("Watching NotificationCenter windows. Trigger a notification; ^C to stop.")
         print("All on-screen NotificationCenter windows are listed; * marks the ones that count as banners.")
         var last: [Int: String] = [:]
@@ -76,7 +81,7 @@ final class NotificationSensor {
             var current: [Int: String] = [:]
             if let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] {
                 let banners = Set(bannerWindows().map { $0.id })
-                for info in list where (info[kCGWindowOwnerName as String] as? String) == ownerName {
+                for info in list where isNotificationCenter(info[kCGWindowOwnerName as String] as? String ?? "") {
                     let id = info[kCGWindowNumber as String] as? Int ?? 0
                     let level = info[kCGWindowLayer as String] as? Int ?? 0
                     var bounds = CGRect.zero
